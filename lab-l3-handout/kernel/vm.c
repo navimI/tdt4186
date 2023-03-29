@@ -15,6 +15,21 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+char shared_mem[(PHYSTOP-KERNBASE)/PGSIZE]; // counter for the processes pages
+
+struct spinlock shared_mem_lock;
+
+#define NPDENTRIES 512
+
+// We initialize the copy on write shared memory table to 0
+void
+shared_mem_init(void)
+{
+  initlock(&shared_mem_lock, "shared_mem_lock");
+  for(int i = 0; i < (PHYSTOP-KERNBASE)/PGSIZE; i++)
+    shared_mem[i] = 0;
+}
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -54,6 +69,7 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
+  shared_mem_init();
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -170,26 +186,65 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a;
+  uint64 a, ism;
   pte_t *pte;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    uint64 pa = PTE2PA(*pte);
+    ism = (pa >> 12) & 0xFFFFF;
+    acquire(&shared_mem_lock);
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      {
+        acquire(&shared_mem_lock);
+        panic("uvmunmap: walk");
+      }
     if((*pte & PTE_V) == 0)
+    {
+      release(&shared_mem_lock);
       panic("uvmunmap: not mapped");
+    }
     if(PTE_FLAGS(*pte) == PTE_V)
+    {
+      release(&shared_mem_lock);
       panic("uvmunmap: not a leaf");
-    if(do_free){
-      uint64 pa = PTE2PA(*pte);
+    }
+    if(do_free && shared_mem[ism] == 0){
       kfree((void*)pa);
     }
+    else{
+      shared_mem[ism]--;
+    }
     *pte = 0;
+    release(&shared_mem_lock);
   }
 }
+
+//TODO: delete if not needed
+//Free page-table and physical memory.
+/* void
+freevm(pde_t *pgdir)
+{
+  uint i;
+
+  if(pgdir == 0)
+    panic("freevm: no pgdir");
+
+  deallocuvm(pgdir, KERNBASE, 0);
+
+  acquire(&shared_mem_lock);
+
+  for(i = 0; i < NPDENTRIES; i++){//NPDENTRIES = 512
+    if(pgdir[i] & PTE_V){
+      char * v = P2V(PTE_ADDR(pgdir[i]));
+      kfree(v);
+    }
+  }
+  kfree((char*)pgdir);
+  release(&shared_mem_lock);
+} */
 
 // create an empty user page table.
 // returns 0 if out of memory.
@@ -331,6 +386,61 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
+
+//TODO: implement copyonwrite
+int
+copyonwrithe(pagetable_t old, pagetable_t new, uint64 sz){
+  pte_t *pte;
+  uint64 pa, i, ism;
+  uint flags;
+  char *mem;
+
+  acquire(&shared_mem_lock);
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+    {
+      release(&shared_mem_lock);
+      panic("uvmcopy: pte should exist");
+    }
+    if((*pte & PTE_V) == 0)
+    {
+      release(&shared_mem_lock);
+      panic("uvmcopy: page not present");
+    }
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    ism = (pa >> 12) & 0xFFFFF;
+
+
+    // save the w flag on the ws, and then sets the w flag to zero
+    flags |= ((flags & PTE_W) ? PTE_COW : 0);
+    flags &= ~PTE_W;
+    *pte &= 0xFFFFF000;
+    *pte |= flags;
+
+    char *mem;
+    if((mem = kalloc()) == 0)
+      goto bad;
+
+    if(mappages(new, (void*)i, PGSIZE, pa, flags) < 0)
+      goto bad;
+
+    shared_mem[ism]++;
+
+    sfence_vma(); // flush the TLB
+    }
+    release(&shared_mem_lock);
+    return new;
+
+    bad:
+
+    uvmfree(new, sz);
+    release(&shared_mem_lock);
+    return 0;
+      
+  }
+  
+
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
