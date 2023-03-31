@@ -9,6 +9,7 @@
 #include "riscv.h"
 #include "defs.h"
 
+
 uint64 MAX_PAGES = 0;
 uint64 FREE_PAGES = 0;
 
@@ -28,10 +29,64 @@ struct
     struct run *freelist;
 } kmem;
 
+char shared_mem[(PHYSTOP-KERNBASE)/PGSIZE]; // counter for the processes pages
+
+
+// We initialize the copy on write shared memory table to 0
+void
+shared_mem_init(void)
+{
+  for(int i = 0; i < (PHYSTOP-KERNBASE)/PGSIZE; i++)
+    shared_mem[i] = 0;
+}
+
+uint64
+getsharedmem(void *pa)
+{
+  int shared = shared_mem[SHARED((uint64)pa)];
+  return shared;
+}
+
+void
+increasesharedmem(void *pa)
+{
+  shared_mem[SHARED((uint64)pa)]++;
+}
+
+void
+decreasesharedmem(void *pa)
+{
+  if (getsharedmem(pa) > 0)
+  {
+    shared_mem[SHARED((uint64)pa)]--;
+  }
+  checkZero(pa);
+  
+}
+
+void
+checkZero(void *pa)
+{
+  if (getsharedmem(pa) == 0)
+  {
+      // Fill with junk to catch dangling refs.
+      memset(pa, 1, PGSIZE);
+
+      struct run *r = (struct run *) (pa);
+
+      acquire(&kmem.lock);
+      r->next = kmem.freelist;
+      kmem.freelist = r;
+      FREE_PAGES++;
+      release(&kmem.lock);
+    }
+}
+
 void kinit()
 {
     initlock(&kmem.lock, "kmem");
     freerange(end, (void *)PHYSTOP);
+    shared_mem_init();
     MAX_PAGES = FREE_PAGES;
 }
 
@@ -53,12 +108,15 @@ void kfree(void *pa)
 {
     if (MAX_PAGES != 0)
         assert(FREE_PAGES < MAX_PAGES);
-    struct run *r;
+    //struct run *r;
 
     if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
         panic("kfree");
 
-    // Fill with junk to catch dangling refs.
+    //if (getsharedmem(pa)>0)
+         decreasesharedmem(pa);
+
+   /*  // Fill with junk to catch dangling refs.
     memset(pa, 1, PGSIZE);
 
     r = (struct run *)pa;
@@ -67,7 +125,7 @@ void kfree(void *pa)
     r->next = kmem.freelist;
     kmem.freelist = r;
     FREE_PAGES++;
-    release(&kmem.lock);
+    release(&kmem.lock); */
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -85,8 +143,10 @@ kalloc(void)
         kmem.freelist = r->next;
     release(&kmem.lock);
 
-    if (r)
+    if (r){
         memset((char *)r, 5, PGSIZE); // fill with junk
-    FREE_PAGES--;
+        increasesharedmem((void *)r);
+        FREE_PAGES--;
+        }
     return (void *)r;
 }

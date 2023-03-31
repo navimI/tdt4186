@@ -170,6 +170,9 @@ void uartputc_sync(int);
 int uartgetc(void);
 
 // vm.c
+void increasesharedmem(void *pa);
+void decreasesharedmem(void *pa);
+void checkZero(void *pa);
 void kvminit(void);
 void kvminithart(void);
 void kvmmap(pagetable_t, uint64, uint64, uint64, int);
@@ -179,6 +182,8 @@ void uvmfirst(pagetable_t, uchar *, uint);
 uint64 uvmalloc(pagetable_t, uint64, uint64, int);
 uint64 uvmdealloc(pagetable_t, uint64, uint64);
 int uvmcopy(pagetable_t, pagetable_t, uint64);
+int copyonwrite(pagetable_t old, pagetable_t new, uint64 sz);
+uint64 getsharedmem(void *pa);
 void uvmfree(pagetable_t, uint64);
 void uvmunmap(pagetable_t, uint64, uint64, int);
 void uvmclear(pagetable_t, uint64);

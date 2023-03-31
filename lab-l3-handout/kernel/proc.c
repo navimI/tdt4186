@@ -372,7 +372,6 @@ int fork(void)
     int i, pid;
     struct proc *np;
     struct proc *p = myproc();
-
     // Allocate process.
     if ((np = allocproc()) == 0)
     {
@@ -380,7 +379,7 @@ int fork(void)
     }
 //TODO: have to being change to read only instead of copy
     // Copy user memory state from parent to child. 
-    if (copyonwrite(p->pagetable, np->pagetable, p->sz) == 0)
+    if (copyonwrite(p->pagetable, np->pagetable, p->sz) < 0)
     {
         freeproc(np);
         release(&np->lock);

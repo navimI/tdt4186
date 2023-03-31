@@ -16,14 +16,14 @@ void testcase4()
     {
         // child
         sleep(50);
-        printf("[chld] pa1 --> 0x%x\n", va2pa((uint64)&global_array[0], 0));
+        printf("[chld] pa1 --> 0x%x\n", va2pa((uint64)&global_array[0], getpid()));
         printf("[chld] v4 --> ");
         print_free_frame_cnt();
 
         global_array[0] = 222;
         printf("[chld] modified one element in the 1st page, global_array[0]=%d\n", global_array[0]);
 
-        printf("[chld] pa2 --> 0x%x\n", va2pa((uint64)&global_array[0], 0));
+        printf("[chld] pa2 --> 0x%x\n", va2pa((uint64)&global_array[0], getpid()));
         printf("[chld] v5 --> ");
         print_free_frame_cnt();
 
@@ -46,7 +46,7 @@ void testcase4()
 
         printf("[prnt] v3 --> ");
         print_free_frame_cnt();
-        printf("[prnt] pa3 --> 0x%x\n", va2pa((uint64)&global_array[0], 0));
+        printf("[prnt] pa3 --> 0x%x\n", va2pa((uint64)&global_array[0], getpid()));
     }
 
     if (wait(0) != pid)

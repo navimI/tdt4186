@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -15,20 +16,11 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-char shared_mem[(PHYSTOP-KERNBASE)/PGSIZE]; // counter for the processes pages
 
-struct spinlock shared_mem_lock;
 
 #define NPDENTRIES 512
 
-// We initialize the copy on write shared memory table to 0
-void
-shared_mem_init(void)
-{
-  initlock(&shared_mem_lock, "shared_mem_lock");
-  for(int i = 0; i < (PHYSTOP-KERNBASE)/PGSIZE; i++)
-    shared_mem[i] = 0;
-}
+
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -69,7 +61,6 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
-  shared_mem_init();
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -186,39 +177,34 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a, ism;
+  uint64 a ;
   pte_t *pte;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    uint64 pa = PTE2PA(*pte);
-    ism = (pa >> 12) & 0xFFFFF;
-    acquire(&shared_mem_lock);
+    
     if((pte = walk(pagetable, a, 0)) == 0)
       {
-        acquire(&shared_mem_lock);
+        
         panic("uvmunmap: walk");
       }
+    uint64 pa = PTE2PA(*pte);
     if((*pte & PTE_V) == 0)
     {
-      release(&shared_mem_lock);
       panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
     {
-      release(&shared_mem_lock);
       panic("uvmunmap: not a leaf");
     }
-    if(do_free && shared_mem[ism] == 0){
-      kfree((void*)pa);
-    }
-    else{
-      shared_mem[ism]--;
+    if(do_free){
+      
+        kfree((void*)pa);
+      
     }
     *pte = 0;
-    release(&shared_mem_lock);
   }
 }
 
@@ -387,56 +373,48 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return -1;
 }
 
-//TODO: implement copyonwrite
-int
-copyonwrithe(pagetable_t old, pagetable_t new, uint64 sz){
-  pte_t *pte;
-  uint64 pa, i, ism;
-  uint flags;
-  char *mem;
 
-  acquire(&shared_mem_lock);
+int
+copyonwrite(pagetable_t old, pagetable_t new, uint64 sz){
+  pte_t *pte;
+  uint64 pa, i ;
+  uint flags;
+
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
     {
-      release(&shared_mem_lock);
       panic("uvmcopy: pte should exist");
     }
     if((*pte & PTE_V) == 0)
     {
-      release(&shared_mem_lock);
       panic("uvmcopy: page not present");
     }
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    ism = (pa >> 12) & 0xFFFFF;
 
 
     // save the w flag on the ws, and then sets the w flag to zero
     flags |= ((flags & PTE_W) ? PTE_COW : 0);
     flags &= ~PTE_W;
-    *pte &= 0xFFFFF000;
-    *pte |= flags;
+    //*pte &= 0xFFFFF000;
+    
 
-    char *mem;
-    if((mem = kalloc()) == 0)
-      goto bad;
+    if(mappages(new, i, PGSIZE, pa, flags) < 0){
+      kfree((void*)pa);
+      goto bad;}
 
-    if(mappages(new, (void*)i, PGSIZE, pa, flags) < 0)
-      goto bad;
+    *pte |= PTE_COW;
+    *pte &= ~PTE_W;
+    increasesharedmem((void *)pa);
 
-    shared_mem[ism]++;
-
-    sfence_vma(); // flush the TLB
+    //sfence_vma(); // flush the TLB
     }
-    release(&shared_mem_lock);
-    return new;
+    return 0;
 
     bad:
 
     uvmfree(new, sz);
-    release(&shared_mem_lock);
-    return 0;
+    return -1;
       
   }
   

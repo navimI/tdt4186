@@ -67,7 +67,53 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 15){
+    // page fault
+    uint va = r_stval();
+    struct proc *p = myproc();
+    char *mem;
+    uint64 pa ;
+    pte_t *pte;
+
+    if(va >= p->sz){
+      printf("usertrap(): Address in process memory space : %d\n",p->pid);
+      setkilled(p);
+    }
+
+    if((pte = walk(p->pagetable, va, 0)) == 0){
+      printf("usertrap(): page table not set pid=%d\n",p->pid);
+      setkilled(p);
+    }
+
+    if((*pte & PTE_V) == 0 || (*pte & PTE_COW) == 0||(*pte & PTE_U) == 0){
+      printf("usertrap(): Copy on write not set pid=%d\n",p->pid);
+      setkilled(p);
+    }
+
+    pa = PTE2PA(*pte);
+
+    if((mem = kalloc()) == 0){
+      printf("usertrap(): kalloc failed pid=%d\n",p->pid);
+      setkilled(p);
+    }
+
+    memmove(mem, (char *)pa, PGSIZE);
+    
+    uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 0);
+
+    if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U|PTE_X) != 0){
+      printf("usertrap(): mappages failed pid=%d\n",p->pid);
+      kfree(mem);
+      setkilled(p);
+    }
+
+    //kfree((void *)pa);
+    decreasesharedmem((void *)pa);
+    
+    
+
+
+    }else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     setkilled(p);
