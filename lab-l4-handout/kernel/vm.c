@@ -5,7 +5,6 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -15,12 +14,6 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
-
-
-
-#define NPDENTRIES 512
-
-
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -177,38 +170,26 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a ;
+  uint64 a;
   pte_t *pte;
 
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    
     if((pte = walk(pagetable, a, 0)) == 0)
-      {
-        
-        panic("uvmunmap: walk");
-      }
-    uint64 pa = PTE2PA(*pte);
+      panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-    {
       panic("uvmunmap: not mapped");
-    }
     if(PTE_FLAGS(*pte) == PTE_V)
-    {
       panic("uvmunmap: not a leaf");
-    }
     if(do_free){
-      
-        kfree((void*)pa);
-      
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
     }
     *pte = 0;
   }
 }
-
-
 
 // create an empty user page table.
 // returns 0 if out of memory.
@@ -315,58 +296,41 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
-// Given a parent process's page table, share
+// Given a parent process's page table, copy
 // its memory into a child's page table.
 // Copies both the page table and the
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
-
 int
-copyonwrite(pagetable_t old, pagetable_t new, uint64 sz){
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+{
   pte_t *pte;
-  uint64 pa, i ;
+  uint64 pa, i;
   uint flags;
+  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-    {
       panic("uvmcopy: pte should exist");
-    }
     if((*pte & PTE_V) == 0)
-    {
       panic("uvmcopy: page not present");
-    }
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-
-
-    // save the w flag on the ws, and then sets the w flag to zero
-    flags |= ((flags & PTE_W) ? PTE_COW : 0);
-    flags &= ~PTE_W;
-    //*pte &= 0xFFFFF000;
-    
-
-    if(mappages(new, i, PGSIZE, pa, flags) < 0){
-      kfree((void*)pa);
-      goto bad;}
-
-    *pte |= PTE_COW;
-    *pte &= ~PTE_W;
-    increasesharedmem((void *)pa);
-
-    sfence_vma(); // flush the TLB
+    if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      goto err;
     }
-    return 0;
-
-    bad:
-
-    uvmfree(new, sz);
-    return -1;
-      
   }
-  
+  return 0;
 
+ err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.

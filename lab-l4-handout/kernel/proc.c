@@ -29,10 +29,12 @@ typedef struct scheduler_impl
 
 // Register all available schedulers here
 // also update schedc, this indicates how long the SchedImpl array is
-#define SCHEDC 1
+#define SCHEDC 2
 static SchedImpl available_schedulers[SCHEDC] = {
-    {"Round Robin", &rr_scheduler, 1}};
+    {"Round Robin", &rr_scheduler, 1},
+    {"MLFQ Sched", &mlfq_scheduler, 2}};
 
+// scheduler pointer contains the current scheduler - you can change the default scheduler if you want.
 void (*sched_pointer)(void) = &rr_scheduler;
 
 // helps ensure that wakeups of wait()ing
@@ -89,13 +91,13 @@ struct user_proc *ps(uint8 start, uint8 count)
     if (count == 0)
     {
         result = 0;
-        return result;
+        return 0;
     }
 
     if (growproc(count * sizeof(struct user_proc)) < 0)
     {
         result = 0;
-        return result;
+        return 0;
     }
 
     struct user_proc loc_result[count];
@@ -118,6 +120,7 @@ struct user_proc *ps(uint8 start, uint8 count)
         acquire(&p->lock);
         if (p->state == UNUSED)
         {
+            // TODO: set zero block at current pos
             loc_result[localCount].state = UNUSED;
             release(&p->lock);
             break;
@@ -210,6 +213,8 @@ allocproc(void)
 found:
     p->pid = allocpid();
     p->state = USED;
+    p->priority = 0;
+    p->promotion_timer = 0;
 
     // Allocate a trapframe page.
     if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
@@ -371,13 +376,15 @@ int fork(void)
     int i, pid;
     struct proc *np;
     struct proc *p = myproc();
+
     // Allocate process.
     if ((np = allocproc()) == 0)
     {
         return -1;
     }
-    // Copy user memory state from parent to child. 
-    if (copyonwrite(p->pagetable, np->pagetable, p->sz) < 0)
+
+    // Copy user memory from parent to child.
+    if (uvmcopy(p->pagetable, np->pagetable, p->sz) < 0)
     {
         freeproc(np);
         release(&np->lock);
@@ -553,24 +560,61 @@ void rr_scheduler(void)
     struct cpu *c = mycpu();
 
     c->proc = 0;
-    for (;;)
-    {
-        // Avoid deadlock by ensuring that devices can interrupt.
-        intr_on();
+    intr_on();
 
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE)
+        {
+            // Switch to chosen process.  It is the process's job
+            // to release its lock and then reacquire it
+            // before jumping back to us.
+            p->state = RUNNING;
+            c->proc = p;
+            swtch(&c->context, &p->context);
+
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            c->proc = 0;
+        }
+        release(&p->lock);
+    }
+}
+
+void mlfq_scheduler(void)
+{
+    struct proc *p;
+    struct cpu *c = mycpu();
+
+    c->proc = 0;
+    intr_on();
+
+    char high_avail = 0;
+    do
+    {
+        high_avail = 0;
         for (p = proc; p < &proc[NPROC]; p++)
         {
             acquire(&p->lock);
+            if (p->priority > 0)
+            {
+
+                release(&p->lock);
+                continue;
+            }
+
             if (p->state == RUNNABLE)
             {
+                high_avail = 1;
                 // Switch to chosen process.  It is the process's job
                 // to release its lock and then reacquire it
                 // before jumping back to us.
                 p->state = RUNNING;
                 c->proc = p;
                 swtch(&c->context, &p->context);
-                // check if we are still the right scheduler (or if schedset changed)
-                if (sched_pointer != &rr_scheduler)
+                // check if we are still the right scheduler
+                if (sched_pointer != &mlfq_scheduler)
                 {
                     release(&p->lock);
                     return;
@@ -582,6 +626,39 @@ void rr_scheduler(void)
             }
             release(&p->lock);
         }
+    } while (high_avail);
+
+    //  RR on low prio - break when high prio found
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+        acquire(&p->lock);
+        if (p->priority == 0 && p->state == RUNNABLE)
+        {
+            // found high prio - switch to high prio task
+            release(&p->lock);
+            break;
+        }
+
+        if (p->state == RUNNABLE)
+        {
+            // Switch to chosen process.  It is the process's job
+            // to release its lock and then reacquire it
+            // before jumping back to us.
+            p->state = RUNNING;
+            c->proc = p;
+            swtch(&c->context, &p->context);
+            // check if we are still the right scheduler
+            if (sched_pointer != &mlfq_scheduler)
+            {
+                release(&p->lock);
+                return;
+            }
+
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            c->proc = 0;
+        }
+        release(&p->lock);
     }
 }
 
@@ -595,7 +672,17 @@ void rr_scheduler(void)
 void sched(void)
 {
     int intena;
-    struct proc *p = myproc();
+    struct proc *p;
+
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+        if (p->priority > 0 && --p->promotion_timer == 0) // using short-ciruit evaluation
+        {
+            p->priority = 0; // we only have two priorities in our scheduler
+        }
+    }
+
+    p = myproc();
 
     if (!holding(&p->lock))
         panic("sched p->lock");
@@ -612,11 +699,17 @@ void sched(void)
 }
 
 // Give up the CPU for one scheduling round.
-void yield(void)
+void yield(int reason)
 {
     struct proc *p = myproc();
     acquire(&p->lock);
     p->state = RUNNABLE;
+    if (reason == YIELD_TIMER)
+    {
+        // process used full quota - reduce priority
+        p->priority = (p->priority + 1 > MAX_PRIO ? p->priority : (p->priority + 1));
+        p->promotion_timer = PROM_TIME;
+    }
     sched();
     release(&p->lock);
 }
@@ -819,27 +912,6 @@ void schedls()
 
 void schedset(int id)
 {
-    if (id < 0 || SCHEDC <= id)
-    {
-        printf("Scheduler unchanged: ID out of range\n");
-        return;
-    }
-    sched_pointer = available_schedulers[id].impl;
-    printf("Scheduler successfully changed to %s\n", available_schedulers[id].name);
-}
-
-int va2pa (int addr, int pid)
-{
-    struct proc *p;
-
-    for (p=proc; p < &proc[NPROC]; p++){
-        if(p->pid == pid)
-            break;
-    }
-
-    if ( p >= &proc[NPROC] || p->state == UNUSED){
-        return 0;
-    }
-
-    return walkaddr(p->pagetable, addr);
+    sched_pointer = available_schedulers[id - 1].impl;
+    printf("Scheduler successfully changed to %s\n", available_schedulers[id - 1].name);
 }

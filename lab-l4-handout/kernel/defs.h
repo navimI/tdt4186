@@ -10,12 +10,8 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
-#define assert(cond)                                        \
-    if (!(cond))                                            \
-    {                                                       \
-        printf("%s@%s:%d\n", __FILE__, __func__, __LINE__); \
-        panic("assert failed");                             \
-    }
+#define YIELD_TIMER 1
+#define YIELD_OTHER 2
 
 // bio.c
 void binit(void);
@@ -68,10 +64,6 @@ void ramdiskintr(void);
 void ramdiskrw(struct buf *);
 
 // kalloc.c
-void increasesharedmem(void *pa);
-void decreasesharedmem(void *pa);
-void freesharedmem(void *pa);
-uint64 getsharedmem(void *pa);
 void *kalloc(void);
 void kfree(void *);
 void kinit(void);
@@ -90,7 +82,7 @@ int pipewrite(struct pipe *, uint64, int);
 
 // printf.c
 void printf(char *, ...);
-void panic(char *, ...) __attribute__((noreturn));
+void panic(char *) __attribute__((noreturn));
 void printfinit(void);
 
 // proc.c
@@ -110,12 +102,13 @@ struct proc *myproc();
 void procinit(void);
 void scheduler(void) __attribute__((noreturn));
 void rr_scheduler(void);
+void mlfq_scheduler(void);
 void sched(void);
 void sleep(void *, struct spinlock *);
 void userinit(void);
 int wait(uint64);
 void wakeup(void *);
-void yield(void);
+void yield(int reason);
 int either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void procdump(void);
@@ -123,7 +116,6 @@ void procdump(void);
 struct user_proc *ps(uint8 start, uint8 count);
 void schedls(void);
 void schedset(int id);
-int va2pa (int addr, int pid);
 
 // swtch.S
 void swtch(struct context *, struct context *);
@@ -183,7 +175,6 @@ void uvmfirst(pagetable_t, uchar *, uint);
 uint64 uvmalloc(pagetable_t, uint64, uint64, int);
 uint64 uvmdealloc(pagetable_t, uint64, uint64);
 int uvmcopy(pagetable_t, pagetable_t, uint64);
-int copyonwrite(pagetable_t old, pagetable_t new, uint64 sz);
 void uvmfree(pagetable_t, uint64);
 void uvmunmap(pagetable_t, uint64, uint64, int);
 void uvmclear(pagetable_t, uint64);

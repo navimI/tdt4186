@@ -40,19 +40,25 @@ shared_mem_init(void)
     shared_mem[i] = 0;
 }
 
+// Return the number of shared pages
+
 uint64
 getsharedmem(void *pa)
 {
-  int shared = shared_mem[SHARED((uint64)pa)];
-  return shared;
+    return shared_mem[SHARED((uint64)pa)];
+
 }
 
+
+// Increase the shared memory counter
 void
 increasesharedmem(void *pa)
 {
   shared_mem[SHARED((uint64)pa)]++;
 }
 
+// Decrease the shared memory counter
+// If the counter is 0 call the free function
 void
 decreasesharedmem(void *pa)
 {
@@ -60,15 +66,19 @@ decreasesharedmem(void *pa)
   {
     shared_mem[SHARED((uint64)pa)]--;
   }
-  checkZero(pa);
+  freesharedmem(pa);
   
 }
 
+//Check if the page is no longer shared
+//If it is not shared, free the page
+
 void
-checkZero(void *pa)
+freesharedmem(void *pa)
 {
   if (getsharedmem(pa) == 0)
   {
+
       // Fill with junk to catch dangling refs.
       memset(pa, 1, PGSIZE);
 
@@ -86,6 +96,7 @@ void kinit()
 {
     initlock(&kmem.lock, "kmem");
     freerange(end, (void *)PHYSTOP);
+    // Initialize the shared memory table
     shared_mem_init();
     MAX_PAGES = FREE_PAGES;
 }
@@ -113,19 +124,12 @@ void kfree(void *pa)
     if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
         panic("kfree");
 
-    //if (getsharedmem(pa)>0)
-         decreasesharedmem(pa);
+    // decrease the shared memory counter
+    // If the counter is 0, free the page
+    
+    decreasesharedmem(pa);
 
-   /*  // Fill with junk to catch dangling refs.
-    memset(pa, 1, PGSIZE);
-
-    r = (struct run *)pa;
-
-    acquire(&kmem.lock);
-    r->next = kmem.freelist;
-    kmem.freelist = r;
-    FREE_PAGES++;
-    release(&kmem.lock); */
+   
 }
 
 // Allocate one 4096-byte page of physical memory.

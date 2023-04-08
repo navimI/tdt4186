@@ -107,8 +107,7 @@ usertrap(void)
       setkilled(p);
     }
 
-    //kfree((void *)pa);
-    decreasesharedmem((void *)pa);
+    kfree((void *)pa);
     
     
 
