@@ -15,6 +15,24 @@ void _main(int argc, char *argv[])
     exit(res);
 }
 
+/* void *_main_thread(void *arg) {
+    int argc = ((int *)arg)[0];
+    char **argv = (char **)(((int *)arg) + 1);
+    extern int main(int argc, char *argv[]);
+    int res = main(argc, argv);
+    exit(res);
+    return NULL;
+}
+
+void _main(int argc, char *argv[]) {
+    struct thread *main_thread;
+    int *arg = malloc((argc + 1) * sizeof(int));
+    arg[0] = argc;
+    memcpy(arg + 1, argv, argc * sizeof(char *));
+    tcreate(&main_thread, NULL, _main_thread, arg);
+    tjoin(main_thread->tid, NULL, 0);
+} */
+
 char *
 strcpy(char *s, const char *t)
 {

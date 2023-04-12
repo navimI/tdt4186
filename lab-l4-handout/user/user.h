@@ -95,6 +95,8 @@ struct context
     uint64 s11;
 };
 
+#define MAXTHREAD 8
+
 /// @brief The thread struct will contain all additional information we require
 ///        to handle for the threads. You might need to store more information
 ///        to implement parts of the tasks. Feel free to extend the struct
