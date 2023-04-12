@@ -10,7 +10,7 @@ void tsched()
 
 void tcreate(struct thread **thread, struct thread_attr *attr, void *(*func)(void *arg), void *arg)
 {
-    // TODO: Create a new process and add it as runnable, such that it starts running
+    // TODO: Create a new thread and add it as runnable, such that it starts running
     // once the scheduler schedules it the next time
 }
 
