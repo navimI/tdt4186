@@ -95,6 +95,15 @@ struct context
     uint64 s11;
 };
 
+// ulock.c
+struct lock
+{
+    uint8 locked;
+
+    char *name;
+    uint8 tid;
+};
+
 #define MAXTHREAD 8
 
 /// @brief The thread struct will contain all additional information we require
@@ -104,6 +113,7 @@ struct context
 struct thread
 {
     uint8 tid;
+    struct lock tlock;
     struct context tcontext;
     enum procstate state;
     void *arg;
@@ -163,14 +173,7 @@ void tyield();
 /// @return The thread id of the currently running thread
 uint8 twhoami();
 
-// ulock.c
-struct lock
-{
-    uint8 locked;
 
-    char *name;
-    uint8 tid;
-};
 
 /// @brief Initializes lock struct. Needs to be called before using a lock for the first time
 /// @param lk Pointer to the lock to be initialized

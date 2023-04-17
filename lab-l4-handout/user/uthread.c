@@ -5,34 +5,51 @@
 #define PGSIZE 4096 // bytes per page
 
 uint32 thread_count;
-struct thread *threads[MAXTHREAD];
-struct lock thread_lock;
+struct thread threads[MAXTHREAD];
+struct lock threads_lock;
 struct thread *current_thread;
 
 void
-thread_init(void)
+threadinit(void)
 {
+    struct thread *t;
+
     thread_count = 0;
-    for (int i = 0; i < MAXTHREAD; i++)
+
+    initlock(&threads_lock, "threads_lock");
+
+    for (t = threads; t < &threads[MAXTHREAD]; t++)
     {
-        threads[i] = 0;
+        initlock(&t->tlock, "thread");
+        t->state = UNUSED;
     }
-    initlock(&thread_lock, "thread lock");
 }
 
 void tsched()
 {
     // TODO: Implement a userspace round robin scheduler that switches to the next thread
-    
+    struct thread *t;
+
+    for(t=threads; t<&threads[MAXTHREAD]; t++)
+    {
+        acquire(&threads_lock);
+        if(t->state == RUNNABLE){
+            t->state = RUNNING;
+            current_thread = t;
+            tswtch(&current_thread->tcontext, &t->tcontext);
+        }
+        release(&threads_lock);
+    }
 
 }
 
 uint8 tidalloc()
 {
-    acquire(&thread_lock);
-    uint8 tid = thread_count;
+    uint8 tid;
+    acquire(&threads_lock);
+    tid = thread_count;
     thread_count++;
-    release(&thread_lock);
+    release(&threads_lock);
     return tid;
 }
 
@@ -44,6 +61,22 @@ void tcreate(struct thread **thread, struct thread_attr *attr, void *(*func)(voi
     uint32 stacksize = PGSIZE;
     uint32 res_size = 0;
     uint64 stack;
+
+    struct thread *t;
+    for (t = threads; t < &threads[MAXTHREAD]; t++)
+    {
+        acquire(&t->tlock);
+        if (t->state == UNUSED)
+        {
+            goto found;
+        }
+        else
+        {
+            release(&t->tlock);
+        }
+    }
+
+found:
 
     *thread = (struct thread *)malloc(sizeof(struct thread));
 
@@ -74,10 +107,7 @@ void tcreate(struct thread **thread, struct thread_attr *attr, void *(*func)(voi
     (*thread)->result = malloc(res_size);
 
     // Add the thread to the threads array
-    threads[thread_count] = *thread;
-
-    // Increment the thread count
-    thread_count++;
+    t = *thread;
 
 }
 
