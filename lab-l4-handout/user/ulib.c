@@ -21,7 +21,7 @@ void _main(int argc, char *argv[])
     extern int main(int argc, char *argv[]);
     int res = main(argc, argv);
     exit(res);
-    return NULL;
+    return 0;
 }
 
 void _main(int argc, char *argv[]) {
@@ -29,8 +29,8 @@ void _main(int argc, char *argv[]) {
     int *arg = malloc((argc + 1) * sizeof(int));
     arg[0] = argc;
     memcpy(arg + 1, argv, argc * sizeof(char *));
-    tcreate(&main_thread, NULL, _main_thread, arg);
-    tjoin(main_thread->tid, NULL, 0);
+    tcreate(&main_thread, 0, _main_thread, arg);
+    tjoin(main_thread->tid, 0, 0);
 } */
 
 char *
