@@ -3,35 +3,21 @@
 #include "kernel/fcntl.h"
 #include "user.h"
 
+
 //
 // wrapper so that it's OK if main() does not call exit() and setup main thread.
 //
 void _main(int argc, char *argv[])
 {
-    // TODO: Ensure that main also is taken into consideration by the thread scheduler
-    // TODO: This function should only return once all threads have finished running
     extern int main(int argc, char *argv[]);
-    int res = main(argc, argv);
-    exit(res);
-}
-
-/* void *_main_thread(void *arg) {
-    int argc = ((int *)arg)[0];
-    char **argv = (char **)(((int *)arg) + 1);
-    extern int main(int argc, char *argv[]);
-    int res = main(argc, argv);
-    exit(res);
-    return 0;
-}
-
-void _main(int argc, char *argv[]) {
+    
+    threadinit();
     struct thread *main_thread;
-    int *arg = malloc((argc + 1) * sizeof(int));
-    arg[0] = argc;
-    memcpy(arg + 1, argv, argc * sizeof(char *));
-    tcreate(&main_thread, 0, _main_thread, arg);
-    tjoin(main_thread->tid, 0, 0);
-} */
+    main_thread = 0;
+    tsave(main_thread);
+    int res = main(argc, argv);
+    exit(res);
+}
 
 char *
 strcpy(char *s, const char *t)

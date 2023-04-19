@@ -147,6 +147,10 @@ extern void tswtch(struct context *old, struct context *new);
 /// @brief The thread scheduler, which will directly switch to the next thread
 void tsched(void);
 
+uint8 tidalloc();
+void tsave(struct thread *thread);
+void threadinit();
+
 /// @brief Allocates and initializes a new thread and stores the newly allocated
 ///        thread into the thread pointer. The created thread will be
 ///        immediately runnable, no further steps required.
