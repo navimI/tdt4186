@@ -104,7 +104,7 @@ struct lock
     uint8 tid;
 };
 
-#define MAXTHREAD 8
+#define MAXTHREAD 9
 
 /// @brief The thread struct will contain all additional information we require
 ///        to handle for the threads. You might need to store more information
@@ -113,9 +113,10 @@ struct lock
 struct thread
 {
     uint8 tid;
-    struct lock tlock;
+    //struct lock tlock;
     struct context tcontext;
     enum procstate state;
+    uint32 stacksize;
     void *arg;
     void *(*func)(void *);
     void *result;
@@ -146,7 +147,8 @@ extern void tswtch(struct context *old, struct context *new);
 
 /// @brief The thread scheduler, which will directly switch to the next thread
 void tsched(void);
-
+void tfree(struct thread *t, uint size);
+void getcontext(struct context *c);
 uint8 tidalloc();
 void tsave(struct thread *thread);
 void threadinit();

@@ -11,9 +11,11 @@ void _main(int argc, char *argv[])
 {
     extern int main(int argc, char *argv[]);
     
+    //Thread initialization
     threadinit();
     struct thread *main_thread;
     main_thread = 0;
+    //Main thread initialization
     tsave(main_thread);
     int res = main(argc, argv);
     exit(res);
